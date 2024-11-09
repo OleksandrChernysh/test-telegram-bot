@@ -112,13 +112,45 @@ bot.on('text', (ctx) => {
 });
 
 app.post('/save-order', (req, res) => {
-    // Handle the request and send a response
-    console.log(req.body); // Log the incoming data
-    // Respond with a JSON object
-    res.status(200).json({
-        message: 'Order saved successfully',
-        orderId: 12345  // Example additional data
-    });
+    // Log incoming data to verify it's being received
+    console.log('Received order data:', req.body);
+
+    const orderDetails = req.body; // The order details from the request body
+
+    // Check if required properties exist in the order data
+    if (!orderDetails.delivery || !orderDetails.products || !orderDetails.finalTotal || !orderDetails.paymentMethod) {
+        console.log('Order data is incomplete.');
+        return res.status(400).json({ message: 'Order data is incomplete' });
+    }
+
+    // Write the order to the CSV file
+    orderWriter
+        .writeRecords([
+            {
+                orderId: `order${Date.now()}`,
+                receiver: orderDetails.delivery.receiver,
+                phone: orderDetails.delivery.phone,
+                city: orderDetails.delivery.city,
+                region: orderDetails.delivery.region,
+                address: orderDetails.delivery.np,
+                paymentMethod: orderDetails.paymentMethod,
+                total: orderDetails.finalTotal,
+                products: orderDetails.products.map((p) => `${p.name} x ${p.quantity}`).join(', '),
+            },
+        ])
+        .then(() => {
+            console.log('Order successfully saved to CSV.');
+
+            // Send a success response back to the frontend
+            res.status(200).json({
+                message: 'Order saved successfully',
+                orderId: `order${Date.now()}`, // Return an example orderId
+            });
+        })
+        .catch((error) => {
+            console.error('Error saving order to CSV:', error);
+            res.status(500).json({ message: 'Error saving order to CSV' });
+        });
 });
 
 // Webhook route to handle Telegram updates
