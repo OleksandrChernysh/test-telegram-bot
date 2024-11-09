@@ -7,7 +7,8 @@ const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 require('dotenv').config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const webAppUrl = process.env.TELEGRAM_APP_URL; // Replace with your actual ngrok URL
+const webAppUrl = process.env.TELEGRAM_APP_URL; // Replace with your actual ngrok URL for WebApp
+const nodeAppUrl = process.env.TELEGRAM_NODEJS_APP_URL; // Replace with your actual ngrok URL for backend
 const bot = new Telegraf(token);
 
 const app = express();
@@ -53,64 +54,29 @@ bot.start((ctx) => {
     });
 });
 
-// Handle incoming order data from the mini app
-bot.on('message', (ctx) => {
-    if (ctx.message.web_app_data) {
-        const chatId = ctx.message.chat.id;
+// Handle incoming order data directly from the backend
+app.post('/webhook', async (req, res) => {
+    const orderDetails = req.body;
+    const chatId = orderDetails.chatId;
 
-        try {
-            const orderDetails = JSON.parse(ctx.message.web_app_data.data);
+    // Compose the order message for the bot
+    let message = `Дякуємо за замовлення!\n\nОтримувач: ${orderDetails.delivery.receiver}\nТелефон: ${orderDetails.delivery.phone}\nМісто: ${orderDetails.delivery.city}, ${orderDetails.delivery.region}\nНова Пошта: ${orderDetails.delivery.np}\nМетод оплати: ${orderDetails.paymentMethod}\n\nТовари:\n`;
+    orderDetails.products.forEach(product => {
+        message += `- ${product.name} x ${product.quantity} (Ціна: ${product.price} грн)\n`;
+    });
+    message += `\nЗагальна сума зі знижкою: ${orderDetails.finalTotal.toFixed(2)} грн`;
 
-            // Check if required properties exist
-            if (!orderDetails.delivery || !orderDetails.products || !orderDetails.finalTotal || !orderDetails.paymentMethod) {
-                ctx.reply('Сталася помилка: дані замовлення неповні.');
-                return;
-            }
-
-            // Save the order to the local CSV file
-            orderWriter
-                .writeRecords([
-                    {
-                        orderId: `order${Date.now()}`,
-                        receiver: orderDetails.delivery.receiver,
-                        phone: orderDetails.delivery.phone,
-                        city: orderDetails.delivery.city,
-                        region: orderDetails.delivery.region,
-                        address: orderDetails.delivery.np,
-                        paymentMethod: orderDetails.paymentMethod,
-                        total: orderDetails.finalTotal,
-                        products: orderDetails.products.map((p) => `${p.name} x ${p.quantity}`).join(', '),
-                    },
-                ])
-                .then(() => {
-                    let message = `Дякуємо за замовлення!\n\nВи замовили:\n`;
-                    orderDetails.products.forEach((product) => {
-                        message += `- ${product.name} x ${product.quantity}\n`;
-                    });
-                    message += `\nЗагальна сума зі знижкою: ${orderDetails.finalTotal.toFixed(2)} грн`;
-
-                    message += orderDetails.paymentMethod === 'peredplata'
-                        ? `\n\nРахунок для оплати: 1112223333444545`
-                        : `\n\nОплата при отриманні`;
-
-                    ctx.reply(message);
-                })
-                .catch((error) => {
-                    console.error('Error saving order to CSV:', error);
-                    ctx.reply('Сталася помилка під час оформлення замовлення. Спробуйте пізніше.');
-                });
-        } catch (error) {
-            console.error('Error processing web_app_data:', error);
-            ctx.reply('Сталася помилка з отриманими даними. Спробуйте ще раз.');
-        }
+    // Send the message to Telegram
+    try {
+        await bot.telegram.sendMessage(chatId, message);
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('Error sending message to Telegram:', error);
+        res.sendStatus(500);
     }
 });
 
-// Handle any text message
-bot.on('text', (ctx) => {
-    console.log('Received a text message:', ctx.message.text);
-});
-
+// Save the order to the local CSV file
 app.post('/save-order', (req, res) => {
     // Log incoming data to verify it's being received
     console.log('Received order data:', req.body);
@@ -153,15 +119,9 @@ app.post('/save-order', (req, res) => {
         });
 });
 
-// Webhook route to handle Telegram updates
-app.post('/webhook', (req, res) => {
-    bot.handleUpdate(req.body, res);
-    res.sendStatus(200); // Send a 200 OK response
-});
-
 // Initialize the bot webhook
 const initBotWebhook = async () => {
-    const webhookUrl = `${webAppUrl}/webhook`; // Replace with your actual ngrok URL
+    const webhookUrl = `${nodeAppUrl}/webhook`; // Set webhook to backend URL
 
     try {
         await bot.telegram.setWebhook(webhookUrl);
